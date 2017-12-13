@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>CherieWordle</title>
+    <style>
+    body{
+        margin: 0;
+    }
+    #html-canvas{
+        /*position: absolute;
+        left:10px;
+        top: 100px;*/
+        width: 1415px;
+        height: 796px;
+        background-color:#FFF0F5;
+        position: relative;
+        /*margin:0 auto;*/
+    }
+    </style>
+</head>
+<body>
+    <div id="html-canvas">
+	</div>
+</body>
+<script>
+/**
+ * 获取画布的中心点坐标
+ @method getCenterPoint
+ @param {HTMLDOMElement} DOMElement 通常是一个div
+ @return {array} [x, y] 包含中心点坐标的数组
+ */
+//function getCenterPoint(DOMElement){
+//  var rect = DOMElement.getBoundingClientRect();
+////  var rectTop = rect.top;
+////  var rectLeft = rect.left;
+////
+////  var ngx = Math.ceil(rectLeft + rect.width);
+////  var ngy = Math.ceil(rectTop + rect.height);
+////  var center = [(ngx / 2) + rectLeft, (ngy / 2) + rectTop];
+////  console.log('rect', rect);
+////  return center;
+//   var center =  [rect.left + rect.width/2, rect.top + rect.height / 2]
+//   console.log(center)
+//    return center
+//}
+
+function getCenterPoint(DOMElement){
+    var rect = DOMElement.getBoundingClientRect();
+    var rectTop = rect.top;
+    var rectLeft = rect.left;
+    var ngx = Math.ceil(rect.width);
+    var ngy = Math.ceil(rect.height);
+    var center = [(ngx / 2) + rectLeft, (ngy / 2) + rectTop];
+
+    return center;
+}
+
+// var tagCanvas = document.getElementById('html-canvas');
+// console.log("所选DOM的中心点为",getCenterPoint(tagCanvas));
+
+// 获取最大半径
+function getMaxRadius(DOMElement, cellSpace){
+  var cellSpace = cellSpace || 1;
+  var rect = DOMElement.getBoundingClientRect();
+  console.log("getBoundingClientRect: ",rect);
+//{ x: 244, y: 0, width: 1415, height: 796, top: 0, right: 1659, bottom: 796, left: 244 }
+  var ngx = Math.ceil(rect.width / cellSpace);
+  var ngy = Math.ceil(rect.height / cellSpace);
+  var maxRadius = Math.floor(Math.sqrt(ngx * ngx + ngy * ngy));
+  // 对角线长度
+  return maxRadius;
+}
+
+/**
+  * 获取圆上每个点的坐标
+  @method getCenterPoint
+  @param {int} radius 半径
+  @param {array} center 类似[11,22]中心点
+  @param {int} offsetY y坐标的偏移位置，默认为1
+  @param {cellSpace} cellSpace 单位距离（cellSpace）参数，是确定以多少像素作为一个半径单位。
+  @return {array} [x, y] 圆上坐标的数组
+  */
+function getPointsAtRadius(radius, center ,offsetY, cellSpace){
+  // 因为像素是一个正方形，一个正方形的四周有8块正方形可包围。
+  var T = 16;
+//  var T = radius * 2 + 1;
+//  var T = 4;
+  var t = T;
+  var points = [];
+  offsetY = offsetY || 1;
+  cellSpace = cellSpace || 30;
+
+  if (radius === 0) {
+    points.push([center[0], center[1]]);
+  }
+  while (t) {
+    // 参考http://www.cnblogs.com/xieon1986/archive/2013/01/28/2880367.html
+    // 圆上每个点的
+    // Y坐标=圆心y坐标 + Math.sin(2*Math.PI / 360) * 半径
+    // X坐标=圆心x坐标 + Math.cos(2*Math.PI / 360) * 半径 
+
+    // 弧度=(2*PI/360)*角度
+    // 基于圆心的x坐标 X坐标=圆心x坐标 + Math.sin((2*Math.PI / 360) * 1) * 半径 
+    // 这里的T同360°的意义
+    points.push(
+      [
+        center[0] + (radius*cellSpace) * Math.cos( (t * 2 * Math.PI )/ T ),
+        center[1] + (radius*cellSpace) * Math.sin( (t * 2 * Math.PI )/ T ) * offsetY,
+      ]
+    );
+
+    t = t - 1;
+  }
+
+  return points;
+}
+// console.log('圆上各点坐标', getPointsAtRadius(1,[731.5, 475]));
+
+/**
+ * 获取文本的宽高
+ @method getCenterPoint
+ @param {HTMLDOMElement} DOMElement 通常是一个div
+ @return {array} [x, y] 包含中心点坐标的数组
+ */
+function getTextInfo(word, userCSS){
+  var fontSize = getRandomFontSize();
+  if(userCSS){
+    fontSize = userCSS.fontSize;
+  }
+
+  // 通过canvas的API来获取文本的各种信息
+  var fcanvas = document.createElement('canvas');
+  var fctx = fcanvas.getContext('2d');
+
+  fctx.font = 'normal ' + fontSize + 'px Hiragino Mincho Pro, serif';
+
+  // 通过canvas的measureText方法获取文本 像素级别的宽度
+  // http://www.w3school.com.cn/tags/canvas_measuretext.asp
+  var fw = fctx.measureText(word).width;
+  // 通过字体大小获取高度
+  var fh = fontSize;
+
+  return {
+    width: Math.ceil(fw),
+    height: fh,
+    word: word,
+    fontSize: fontSize
+  }
+}
+
+// 计算两个向量叉乘 |p1 p2| X |p1 p|
+function GetCross(p1, p2,p) {
+    // p [x = 0,y = 1]
+    return (p2[0] - p1[0]) * (p[1] - p1[1]) -(p[0] - p1[0]) * (p2[1] - p1[1]);
+}
+
+// 计算点 p 是否在 rect 内
+function isPointInMatrix(rect, p){
+    var p1 = rect[0],
+        p2 = rect[1],
+        p3 = rect[2],
+        p4 = rect[3];
+    return GetCross(p1,p2,p) * GetCross(p3,p4,p) >= 0 && GetCross(p2,p3,p) * GetCross(p4,p1,p) >= 0;
+}
+
+// 判断两条线段是否相交
+//叉积
+function mult(a, b, c)
+{
+    return (a[0]-c[0])*(b[1]-c[1])-(b[0]-c[0])*(a[1]-c[1]);
+}
+
+//aa, bb为一条线段两端点 cc, dd为另一条线段的两端点 相交返回true, 不相交返回false
+//aa, bb为一条线段两端点 cc, dd为另一条线段的两端点 相交返回true, 不相交返回false
+//aa, bb为一条线段两端点 cc, dd为另一条线段的两端点 相交返回true, 不相交返回false
+function intersect(aa, bb, cc, dd)
+{
+    if ( Math.max(aa[0], bb[0])<Math.min(cc[0], dd[0]) )
+    {
+        return false;
+    }
+    if ( Math.max(aa[1], bb[1])<Math.min(cc[1], dd[1]) )
+    {
+        return false;
+    }
+    if ( Math.max(cc[0], dd[0])<Math.min(aa[0], bb[0]) )
+    {
+        return false;
+    }
+    if ( Math.max(cc[1], dd[1])<Math.min(aa[1], bb[1]) )
+    {
+        return false;
+    }
+    if ( mult(cc, bb, aa)*mult(bb, dd, aa)<0 )
+    {
+        return false;
+    }
+    if (mult(aa, dd, cc)*mult(dd, bb, cc)<0 )
+    {
+        return false;
+    }
+    return true;
+}
+// 判断两条线段是否相交 END
+
+// 判断两个矩形是否碰撞
+function isCrossRectAny(rect1, rect2){
+    var idx = 0,p;
+    for(idx = 0; idx < 4;idx ++){
+        p = rect1[idx];
+//        console.log("rect1",rect1)
+        if(isPointInMatrix(rect2,p)){
+//            console.log("crossed!!!!!!!!!!!!!!!!!-------------------------")
+            return true;
+        }
+    }
+
+    for(idx = 0; idx < 4;idx ++){
+        p = rect2[idx];
+        if(isPointInMatrix(rect1,p)){
+            return true;
+        }
+    }
+
+    if(intersect(rect1[0],rect1[2],rect2[0],rect2[2])){
+        return true;
+    }
+
+    if(intersect(rect1[0],rect1[2],rect2[1],rect2[3])){
+        return true;
+    }
+
+    if(intersect(rect1[1],rect1[3],rect2[0],rect2[2])){
+        return true;
+    }
+
+    if(intersect(rect1[1],rect1[3],rect2[1],rect2[3])){
+        return true;
+    }
+
+
+    return false;
+}
+
+// console.log('你输入的文字长宽为', getTextInfo('你好'));
+
+/**
+ * 判断两个矩形是否相交
+ * 参考：http://www.cnblogs.com/avril/archive/2012/11/13/2767577.html
+ * http://www.cnblogs.com/avril/archive/2013/04/01/2993875.html
+ @method isCorssRect
+ @param {array} 
+ @param {array} 
+ @return {bool} true表示有重叠，false表示没有重叠
+ */
+function isCorssRect(array1, array2){
+  var Xa1 = array1[0][0];
+  var Ya1 = array1[0][1];
+  var Xa2 = array1[1][0];
+  var Ya2 = array1[1][1];
+
+  var Xb1 = array2[0][0];
+  var Yb1 = array2[0][1];
+  var Xb2 = array2[1][0];
+  var Yb2 = array2[1][1];
+
+  var Xc1 = Math.max(Xa1,Xb1);
+  var Yc1 = Math.max(Ya1,Yb1);
+  var Xc2 = Math.min(Xa2,Xb2);
+  var Yc2 = Math.min(Ya2,Yb2); 
+
+  return (Xc1 <= Xc2 && Yc1 <= Yc2);
+}
+
+
+//获取随机颜色的值
+function getRandomColor(){
+  var arr = [0,1,2,3,4,5,6,7,8,9,'A','B','C','D','E','F'];
+  var color = "#";
+  for(i=0;i<6;i++){
+    var c = parseInt(Math.random()*16);
+    c = arr[c];
+    color = color + c;
+  }
+  return color;
+}
+
+// 获取随机文字的大小
+function getRandomFontSize(){
+  var arr = [18,23,28,35,40,52,60];
+  var res = [];
+  for (var i = 0, len = arr.length; i < len; i++) {
+    var j = Math.floor(Math.random() * arr.length);
+    res[i] = arr[j];
+    arr.splice(j, 1);
+  }
+  return res[0];
+}
+
+Angles = [0,30,60,90,120,150,180,210,240,270,300,330,360];
+function getRandomRotate(i){
+    // 暂定这几个度数
+    var arr = Angles;
+    if(i) {
+        return arr[i]
+    }
+    var j = Math.floor(Math.random() * arr.length);
+    var angle = Math.floor(Math.random() * 360);
+//    return arr[j];
+    return angle;
+}
+
+function drawText(position, textInfo, canvas, angle){
+  var span = document.createElement('span');
+  var styleRules = {
+    'position': 'absolute',
+    'display': 'block',
+    'font': 'normal' + ' '+textInfo.fontSize+'px ' + 'Hiragino Mincho Pro, serif',
+    'left': position[0] + 'px',
+    'top': position[1] + 'px',
+    'width': textInfo.width + 'px',
+    'height': textInfo.height + 'px',
+    'lineHeight': 1,
+    'color': getRandomColor(),
+    'transform':'rotate('+angle+'deg)'
+  };
+  span.textContent = textInfo.word;
+  for (var cssProp in styleRules) {
+    span.style[cssProp] = styleRules[cssProp];
+  }
+  canvas.appendChild(span);
+}
+
+/**
+ * 获取文本的左上右下坐标，
+ @param {array} topLeft 类似
+ @return {object} textInfo 包含中心点坐标的数组
+ */
+function getTopLeft(topLeft, textInfo){
+  var left1 = topLeft[0];
+  var top1 = topLeft[1];
+ 
+  return [
+    [left1, top1],
+    [left1+ textInfo[0], top1 + textInfo[1]]
+  ];
+}
+
+// 点 p 围绕点 center 旋转 angle 度
+function getPointAfterRotate(center, p, angle){
+    angle = angle * 2 * Math.PI / 360;
+    var x = ( p[0] - center[0])*Math.cos(angle) - (p[1] - center[1])*Math.sin(angle) + center[0];
+    var y = (p[0] - center[0])*Math.sin(angle) + (p[1] - center[1])*Math.cos(angle) + center[1];
+    return [x,y]
+}
+
+// 矩形绕中心点旋转 angle度后各点坐标
+function getRect(topLeft, texInfo, angle){
+    var p1 = [topLeft[0],topLeft[1]];
+    var width = texInfo[0], height = texInfo[1];
+    var p2 = [p1[0],p1[1] + height],
+            p3 = [p1[0] + width,p1[1] + height],
+            p4 = [p1[0] + width,p1[1]];
+    var p = [p1[0] + width / 2, p1[1] + height / 2]
+    return [getPointAfterRotate(p,p1,angle),getPointAfterRotate(p,p2,angle),getPointAfterRotate(p,p3,angle),getPointAfterRotate(p,p4,angle)]
+}
+
+
+// 获取可安置的坐标 drawArray: 已放入的点
+function getDrawPosition(textInfo, maxRadius, center, cellSpace ,drawArray){
+  var textInfo_width = textInfo.width;
+  var textInfo_height = textInfo.height;
+  cellSpace = cellSpace || 10;
+  var offsetY = 0.8, angle = 0;
+  for(var i=0; i<maxRadius; i++){
+    // 获得环绕的可选起点
+    var points = getPointsAtRadius(i, center, offsetY, cellSpace);
+//    console.log(i,points);
+
+    pointsLoop:
+    for(var j=0; j<points.length; j++){
+      // 随机旋转度数
+      angle = getRandomRotate();
+      // 获得旋转 angle 度后矩形四个顶点的坐标。
+      var rect = getRect(points[j], [textInfo_width, textInfo_height], angle);
+//        console.log("rotated:", rect)
+      // 是否和已存的文字碰撞
+      for(var z =0 ; z< drawArray.length; z++){
+        if(isCrossRectAny(rect, drawArray[z])){
+//            console.log("crossed!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+          continue pointsLoop;
+        }
+        
+      }
+      drawArray.push(rect);  // 左上角，右下角两个点
+      return [points[j],angle];
+    }
+  }
+  return null;
+}
+
+
+function start(){
+  var tagCanvas = document.getElementById('html-canvas');
+  // 获取画布中心
+  var center = getCenterPoint(tagCanvas);
+
+  // 设置最大半径
+  var cellSpace = 10;  // cell space 是什么意思？
+  var maxRadius = getMaxRadius(tagCanvas, cellSpace);
+  console.log("maxRadius: "+ maxRadius);
+
+  var data = ["congratulation","Word","clouds","Cherie","design","love","bear","sunshine","forever","validation","exception","sunny","visualization","details","procedure","reflection","popularity","color","strategy"];
+//  var data = ["congratulation","Word","clouds"]
+  var drawArray = [];  // 碰撞检测
+  var tempDrawPositionArray = [];  // 绘图目标位置
+
+  // 对于每一个文字，设置位置及属性
+  for(var i =0; i< data.length; i++){
+    var dataItem = data[i];
+    var textInfo = getTextInfo(dataItem);
+    var drawPositionAndAngle = null;
+
+    if(i != 0){
+        drawPositionAndAngle = getDrawPosition(textInfo, maxRadius, center, cellSpace, drawArray);
+    } else{
+      textInfo = getTextInfo(dataItem, {fontSize:60});
+      drawPositionAndAngle = getDrawPosition(
+        textInfo, 
+        maxRadius,
+        [center[0]-(textInfo.width/2), center[1]-(textInfo.height/2)],
+        cellSpace, 
+        drawArray
+      );
+    }
+
+    if(drawPositionAndAngle == null){
+        alert("There must be some error!");
+        continue;
+    }
+    if(tempDrawPositionArray){
+      tempDrawPositionArray.push([drawPositionAndAngle[0], textInfo, tagCanvas,drawPositionAndAngle[1]]);
+    }
+  }
+
+  // 将文字画在图上
+  var timer = setInterval(function(){
+    var textItem = tempDrawPositionArray.shift();
+    if(textItem){
+      drawText(textItem[0], textItem[1], textItem[2],textItem[3]);
+    }
+    else{
+      clearInterval(timer);
+    }
+  }, 0);
+
+  
+}
+
+window.onload = function(){
+    start();
+}
+
+</script>
+</html>
